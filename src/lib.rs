@@ -9,8 +9,11 @@
 //! See the `LICENSE.markdown` file in the repo for
 //! information on licensing and copyright.
 
+mod examples;
+
 use std::collections::BTreeMap;
 use std::convert::TryInto;
+use std::io::BufReader;
 
 // The AWS Nitro Attestation Document.
 // This is described in
@@ -61,9 +64,12 @@ impl AttestationDocument {
         let cert = rustls::Certificate(document.certificate.clone());
         certs.push(cert);
 
+
+        let mut ca_reader = BufReader::new(&trusted_root_cert[..]);
+
         let mut root_store = rustls::RootCertStore::empty();
         root_store
-            .add(&rustls::Certificate(trusted_root_cert.to_vec()))
+            .add_pem_file(&mut ca_reader)
             .map_err(|err| {
                 format!(
                     "AttestationDocument::authenticate failed to add trusted root cert:{:?}",
@@ -263,4 +269,41 @@ impl AttestationDocument {
             nonce: nonce,
         })
     }
+}
+
+use serde::{Serialize,Deserialize};
+#[derive(Debug, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum Response {
+    ExtendPCR {
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
+    Attestation {
+        #[serde(with = "serde_bytes")]
+        document: Vec<u8>,
+    },
+}
+
+pub fn from_a(s:&[u8]) -> crate::Response {
+    use serde_json;
+    let res: crate::Response = serde_json::from_slice(s).unwrap();
+    res
+}
+
+#[test]
+fn test_verify() {
+    pub const REPORT : &[u8] = include_bytes!("./AttestationDoc");
+    pub const CA : &[u8] = include_bytes!("./root.pem");
+
+    let doc = examples::Doc_with_nonce;
+
+    let res = AttestationDocument::authenticate(&doc,CA);
+
+    match res{
+        Ok(_) => {},
+        Err(ref e) => println!("{:?}",e),
+    }
+
+    assert_eq!(res.is_ok(),true);
 }
